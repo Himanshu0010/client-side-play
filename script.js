@@ -166,31 +166,29 @@ function handleMessage(message) {
             sendAudioData();
             break;
             case 'audioStream':
-                // Append the new chunk to the accumulated audio data
-                const audioDataChunk = Uint8Array.from(atob(message.data), (c) => c.charCodeAt(0));
-                accumulatedAudioChunks.push(audioDataChunk);
-    
-                // Clear the previous timeout if it's set
-                if (audioStreamTimeout) {
-                    clearTimeout(audioStreamTimeout);
-                }
-    
-                // Set a new timeout to process audio after 8 seconds
-                audioStreamTimeout = setTimeout(() => {
-                    const completeAudioData = concatenateUint8Arrays(accumulatedAudioChunks);
-    
-                    // Now convert this complete audio data to base64
-                    const completeBase64Data = btoa(String.fromCharCode.apply(null, completeAudioData));
-    
-                    // Attempt to download the full audio file and play it
-                    downloadBase64AsFile(completeBase64Data, 'complete_audio.mp3', 'audio/mp3');
-                    playAudioData(completeBase64Data, 'audio/mp3');
-    
-                    // Reset the accumulated chunks and timeout reference
-                    accumulatedAudioChunks = [];
-                    audioStreamTimeout = null;
-                }, 8000); // 8 seconds
-                break;        
+            // Convert the base64 string to a Uint8Array and store it
+            const audioDataChunk = Uint8Array.from(atob(message.data), c => c.charCodeAt(0));
+            accumulatedAudioChunks.push(audioDataChunk);
+
+            // If there's an existing timeout, clear it
+            if (audioStreamTimeout) {
+                clearTimeout(audioStreamTimeout);
+            }
+
+            // Set a new timeout for 8 seconds
+            audioStreamTimeout = setTimeout(() => {
+                // Time's up, process the accumulated audio data
+                const completeAudioData = concatenateUint8Arrays(accumulatedAudioChunks);
+                const completeBase64Data = btoa(String.fromCharCode.apply(null, completeAudioData));
+
+                // Play the audio directly in the browser
+                playAudioData(completeBase64Data, 'audio/mp3');
+
+                // Clear the accumulated chunks
+                accumulatedAudioChunks = [];
+            }, 8000); // 8 seconds
+
+            break;     
         case 'newAudioStream':
             console.log('New audio stream started');
             break;
@@ -202,7 +200,7 @@ function handleMessage(message) {
     }
 }
 
-function playAudioData(base64Data) {
+function playAudioData(base64Data, mimeType) {
     try {
         // Convert base64 string to a Blob object
         const binaryString = window.atob(base64Data);
@@ -213,38 +211,27 @@ function playAudioData(base64Data) {
         }
         const blob = new Blob([bytes], { type: mimeType });
 
-        // Debugging: Log the blob size to see if it seems reasonable
-        console.log('Blob size:', blob.size);
-
         // Create an object URL for the Blob
         const audioURL = URL.createObjectURL(blob);
-        console.log('Audio URL:', audioURL); // Check the URL
-
-        // Create a link for downloading the blob as a file
-        const downloadLink = document.createElement('a');
-        downloadLink.href = audioURL;
-        downloadLink.download = 'audio.mp3';
-        downloadLink.innerText = 'Download MP3 file';
-        downloadLink.style.display = 'block';
-        document.body.appendChild(downloadLink);
 
         // Create an audio element for playback
         const audioElement = new Audio(audioURL);
         audioElement.controls = true;
-        document.body.appendChild(audioElement); // Add the controls to the page for testing
-        
+        audioElement.addEventListener('loadeddata', () => {
+            audioElement.play();
+        });
         audioElement.addEventListener('error', () => {
             const error = audioElement.error;
             console.error('Error code:', error.code, 'Error message:', error.message);
         });
-        // Play the audio or log an error when it fails to play
-        audioElement.play().catch((e) => console.error('Error playing audio:', e));
+
+        // Append the audio element to the DOM
+        document.body.appendChild(audioElement);
 
         // Remove the object URL when it's no longer needed to free up memory
         audioElement.onended = audioElement.onerror = () => {
             URL.revokeObjectURL(audioURL);
             audioElement.remove(); // Clean up the audio element from the DOM
-            downloadLink.remove(); // Clean up the download link from the DOM
         };
     } catch (e) {
         console.error('Error converting base64 data to audio:', e);
