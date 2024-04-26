@@ -27,6 +27,11 @@ function connectToAgent() {
         const data = JSON.parse(event.data);
         handleMessage(data);
     };
+    
+    socket.on('message', function incoming(message) {
+        console.log('Sending this message to server:', message);
+        playAiSocket.send(message);
+    });
 
     socket.onerror = (error) => {
         console.error('WebSocket error:', error);
@@ -51,6 +56,7 @@ function startRecording() {
             console.error('Error accessing microphone:', error);
         });
 }
+
 
 function stopRecording() {
     mediaRecorder.stop();
