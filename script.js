@@ -52,14 +52,20 @@ function startRecording() {
 function handleAudioData(event) {
     if (event.data.size > 0) {
         event.data.arrayBuffer().then(buffer => {
-            const pcmData = new Int16Array(buffer);
+            // Make sure the buffer byte length is even
+            const byteLength = buffer.byteLength - (buffer.byteLength % 2);
+            const pcmDataBuffer = new ArrayBuffer(byteLength);
+            const view = new Uint8Array(buffer);
+            const pcmDataView = new Uint8Array(pcmDataBuffer);
+            pcmDataView.set(view.subarray(0, byteLength));
+            const pcmData = new Int16Array(pcmDataBuffer);
+            
             const muLawData = encodeToMuLaw(pcmData);
             const base64Data = btoa(String.fromCharCode.apply(null, muLawData));
             sendAudioData(base64Data);
         });
     }
 }
-
 function encodeToMuLaw(pcmData) {
     const mu = 255;
     const muLawData = new Uint8Array(pcmData.length / 2);
