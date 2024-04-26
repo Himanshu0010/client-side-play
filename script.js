@@ -99,45 +99,9 @@ function muLawEncode(sample) {
     return muLawSample;
 }
 
-//to check
-function base64ToBlob(base64, mimeType) {
-    const byteCharacters = atob(base64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    return new Blob([byteArray], { type: mimeType });
-}
-
-function downloadBase64AsFile(base64Data, filename, mimeType) {
-    const blob = base64ToBlob(base64Data, mimeType);
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    document.body.appendChild(a);
-    a.style = 'display: none';
-    a.href = url;
-    a.download = filename;
-    a.click();
-
-    window.URL.revokeObjectURL(url);
-    a.remove();
-}
 
 let audioStreamTimeout = null;
 let accumulatedAudioChunks = [];
-
-function concatenateUint8Arrays(arrays) {
-    let totalLength = arrays.reduce((acc, value) => acc + value.length, 0);
-    let result = new Uint8Array(totalLength);
-    let offset = 0;
-    for (let array of arrays) {
-        result.set(array, offset);
-        offset += array.length;
-    }
-    return result;
-}
 
 let accumulatedAudioData = new Uint8Array();
 
@@ -175,12 +139,23 @@ function handleMessage(message) {
         case 'newAudioStream':
             console.log('New audio stream started');
             break;
-        case 'error':
-            console.error(`Error ${message.code}: ${message.message}`);
-            break;
+            case 'error':
+                console.error(`Error ${message.code}: ${message.message}`);
+                handleServerError(message.code, message.message);
+                break;
         default:
             console.log('Unhandled message:', message);
     }
+}
+
+function handleServerError(code, message) {
+    // Example display in the web interface, or perform any other appropriate error handling
+    const errorMessageDisplay = document.getElementById('error-message-display');
+    errorMessageDisplay.innerHTML = `Error ${code}: ${message}`;
+    errorMessageDisplay.style.display = 'block';  // Make sure this element is visible
+
+    // Log to console as well
+    console.error(`Server Error - Code ${code}: ${message}`);
 }
 
 function playNextInQueue() {
