@@ -5,6 +5,8 @@ let socket;
 let mediaRecorder;
 let audioChunks = [];
 let initialAudioStreamReceived = false;
+let isRecording = false;
+const MIN_CHUNK_SIZE = 16000;
 
 connectButton.addEventListener('click', connectToAgent);
 
@@ -27,11 +29,6 @@ function connectToAgent() {
         const data = JSON.parse(event.data);
         handleMessage(data);
     };
-    
-    socket.on('message', function incoming(message) {
-        console.log('Sending this message to server:', message);
-        playAiSocket.send(message);
-    });
 
     socket.onerror = (error) => {
         console.error('WebSocket error:', error);
@@ -43,68 +40,37 @@ function connectToAgent() {
 }
 
 function startRecording() {
-    navigator.mediaDevices.getUserMedia({ audio: true })
-        .then((stream) => {
-            mediaRecorder = new MediaRecorder(stream);
-            mediaRecorder.ondataavailable = (event) => {
-                audioChunks.push(event.data);
-            };
-            mediaRecorder.start();
-            console.log('Recording started');
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+        .then(stream => {
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=pcm' });
+            mediaRecorder.ondataavailable = handleAudioData;
+            mediaRecorder.start(1000);  // Collect 1000ms of data in each audio chunk
         })
-        .catch((error) => {
-            console.error('Error accessing microphone:', error);
-        });
+        .catch(error => console.error('Error accessing microphone:', error));
 }
 
-
-function stopRecording() {
-    mediaRecorder.stop();
-    console.log('Recording stopped');
-}
-
-
-function sendAudioData() {
-    audioContext.decodeMultipleChunks(audioChunks)
-        .then(async (audioBuffer) => {
-            const mulawData = encodeToMuLaw(audioBuffer);
-            const base64Data = btoa(String.fromCharCode.apply(null, mulawData));
-            const audioMessage = {
-                type: 'audioIn',
-                data: base64Data,
-            };
-            socket.send(JSON.stringify(audioMessage));
-            audioChunks = [];
-        })
-        .catch((error) => {
-            console.error('Error decoding audio chunks:', error);
-        });
-}
-
-function encodeToMuLaw(audioBuffer) {
-    const pcmData = audioBuffer.getChannelData(0);
-    const mulawData = new Uint8Array(pcmData.length);
-
+function encodeToMuLaw(pcmData) {
+    const mu = 255;
+    const muLawData = new Uint8Array(pcmData.length / 2);
     for (let i = 0; i < pcmData.length; i++) {
-        const sample = Math.max(-1, Math.min(1, pcmData[i]));
-        const muLawSample = muLawEncode(sample);
-        mulawData[i] = muLawSample;
+        const s = Math.min(Math.max(-32768, pcmData[i]), 32767);
+        const sign = s < 0 ? 0x80 : 0x00;
+        const abs = Math.abs(s);
+        const exponent = Math.floor(Math.log(abs / 32635 + 1) / Math.log(1 + 1 / 255));
+        const mantissa = (abs >> (exponent + 1)) & 0x0f;
+        muLawData[i] = ~(sign | (exponent << 4) | mantissa);
     }
-
-    return mulawData;
+    return muLawData;
 }
 
-function muLawEncode(sample) {
-    const muLawClip = 32;
-    const muLawBias = 0;
-
-    const sign = sample < 0 ? 1 : 0;
-    const encoded = Math.floor(Math.log(1 + muLawClip * Math.abs(sample)) / Math.log(1 + muLawClip));
-    const muLawSample = (sign << 7) | (encoded << 4) | (encoded << 1) | muLawBias;
-
-    return muLawSample;
+function sendAudioData(base64Data) {
+    const audioMessage = {
+        type: 'audioIn',
+        data: base64Data
+    };
+    socket.send(JSON.stringify(audioMessage));
+    console.log('Sent audio data');
 }
-
 
 let audioStreamTimeout = null;
 let accumulatedAudioChunks = [];
@@ -120,16 +86,11 @@ function handleMessage(message) {
     switch (message.type) {
         case 'voiceActivityStart':
             console.log('Voice activity started');
-            stopRecording();
-            sendAudioData();
-            startRecording();
             break;
         case 'voiceActivityEnd':
             console.log('Voice activity ended');
-            stopRecording();
-            sendAudioData();
             break;
-            case 'audioStream':
+        case 'audioStream':
             const audioDataChunk = Uint8Array.from(atob(message.data), c => c.charCodeAt(0));
             const newAccumulatedAudioData = new Uint8Array(accumulatedAudioData.length + audioDataChunk.length);
             newAccumulatedAudioData.set(accumulatedAudioData);
@@ -155,25 +116,22 @@ function handleMessage(message) {
 }
 
 function handleServerError(code, message) {
-    // Example display in the web interface, or perform any other appropriate error handling
     const errorMessageDisplay = document.getElementById('error-message-display');
     errorMessageDisplay.innerHTML = `Error ${code}: ${message}`;
     errorMessageDisplay.style.display = 'block';  // Make sure this element is visible
 
-    // Log to console as well
     console.error(`Server Error - Code ${code}: ${message}`);
 }
 
 function playNextInQueue() {
     if (!isPlayingAudio && audioQueue.length > 0) {
-        const audioData = audioQueue.shift();  // Take the first item from queue
+        const audioData = audioQueue.shift();
         playAudioData(audioData);
     }
 }
 
 function playAudioData(audioData) {
     isPlayingAudio = true;
-    // Convert the accumulated Uint8Array to an ArrayBuffer for the decodeAudioData method
     audioContext.decodeAudioData(audioData.buffer).then((decodedData) => {
         const source = audioContext.createBufferSource();
         source.buffer = decodedData;
@@ -182,11 +140,11 @@ function playAudioData(audioData) {
 
         source.onended = function() {
             isPlayingAudio = false;
-            playNextInQueue();  // Call to play the next audio in the queue if exists
+            playNextInQueue();
         };
     }).catch((error) => {
         console.error('Error with decoding audio data', error);
         isPlayingAudio = false;
-        playNextInQueue();  // Attempt to play next even if current one fails
+        playNextInQueue();
     });
 }
