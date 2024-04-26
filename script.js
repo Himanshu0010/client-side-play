@@ -62,7 +62,7 @@ function handleAudioData(event) {
             
             const muLawData = encodeToMuLaw(pcmData);
             const base64Data = btoa(String.fromCharCode.apply(null, muLawData));
-            sendAudioData(base64Data);
+            socket.send(base64Data);
         });
     }
 }
@@ -80,14 +80,14 @@ function encodeToMuLaw(pcmData) {
     return muLawData;
 }
 
-function sendAudioData(base64Data) {
-    const audioMessage = {
-        type: 'audioIn',
-        data: base64Data
-    };
-    socket.send(JSON.stringify(audioMessage));
-    console.log('Sent audio data');
-}
+// function sendAudioData(base64Data) {
+//     const audioMessage = {
+//         type: 'audioIn',
+//         data: base64Data
+//     };
+//     socket.send(JSON.stringify(audioMessage));
+//     console.log('Sent audio data');
+// }
 
 let audioStreamTimeout = null;
 let accumulatedAudioChunks = [];
