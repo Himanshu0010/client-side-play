@@ -49,6 +49,17 @@ function startRecording() {
         .catch(error => console.error('Error accessing microphone:', error));
 }
 
+function handleAudioData(event) {
+    if (event.data.size > 0) {
+        event.data.arrayBuffer().then(buffer => {
+            const pcmData = new Int16Array(buffer);
+            const muLawData = encodeToMuLaw(pcmData);
+            const base64Data = btoa(String.fromCharCode.apply(null, muLawData));
+            sendAudioData(base64Data);
+        });
+    }
+}
+
 function encodeToMuLaw(pcmData) {
     const mu = 255;
     const muLawData = new Uint8Array(pcmData.length / 2);
