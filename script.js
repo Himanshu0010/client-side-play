@@ -1,35 +1,23 @@
-const API_KEY = 'Bearer ak-11a540091f994b2fbbdfac05c61f63b1';
-const AGENT_ID = 'My-AI-api-maplw-RLOeYdc7spH-rH_';
-const WebSocket = window.WebSocket || window.MozWebSocket;
-
 const connectButton = document.getElementById('connectButton');
 const conversationLog = document.getElementById('conversationLog');
 
 let socket;
 let mediaRecorder;
 let audioChunks = [];
+let initialAudioStreamReceived = false;
 
 connectButton.addEventListener('click', connectToAgent);
 
-let initialAudioStreamReceived = false;
+const audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
 function connectToAgent() {
-    const socketUrl = `wss://api.play.ai/v1/agent-conversation?agentId=${AGENT_ID}`;
+    const socketUrl = 'ws://localhost:3000';
     socket = new WebSocket(socketUrl);
 
     socket.onopen = () => {
         console.log('WebSocket connection established');
-        const setupMessage = {
-            type: 'setup',
-            apiKey: API_KEY,
-            enableVad: true,
-            outputFormat: 'mp3',
-            outputSampleRate: 24000,
-        };
-        socket.send(JSON.stringify(setupMessage));
         startRecording();
-    
-        // Check if the initial audio stream has been received
+
         if (!initialAudioStreamReceived) {
             console.log('Waiting for initial audio stream...');
         }
@@ -69,7 +57,6 @@ function stopRecording() {
     console.log('Recording stopped');
 }
 
-const audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
 function sendAudioData() {
     audioContext.decodeMultipleChunks(audioChunks)
@@ -154,7 +141,9 @@ function concatenateUint8Arrays(arrays) {
 
 let accumulatedAudioData = new Uint8Array();
 
-// Define a minimum size threshold for audio data before attempting to decode
+let audioQueue = [];
+let isPlayingAudio = false;
+
 const MIN_AUDIO_SIZE_THRESHOLD = 16000;
 
 function handleMessage(message) {
@@ -171,19 +160,18 @@ function handleMessage(message) {
             sendAudioData();
             break;
             case 'audioStream':
-                // Convert the base64 string to a Uint8Array and accumulate it
-                const audioDataChunk = Uint8Array.from(atob(message.data), c => c.charCodeAt(0));
-                const newAccumulatedAudioData = new Uint8Array(accumulatedAudioData.length + audioDataChunk.length);
-                newAccumulatedAudioData.set(accumulatedAudioData);
-                newAccumulatedAudioData.set(audioDataChunk, accumulatedAudioData.length);
-                accumulatedAudioData = newAccumulatedAudioData;
-    
-                // If the accumulated data size exceeds the threshold, attempt to decode and play
-                if (accumulatedAudioData.length >= MIN_AUDIO_SIZE_THRESHOLD) {
-                    playAudioData(accumulatedAudioData);
-                    accumulatedAudioData = new Uint8Array(); // Reset for next audio stream
-                }
-                break;  
+            const audioDataChunk = Uint8Array.from(atob(message.data), c => c.charCodeAt(0));
+            const newAccumulatedAudioData = new Uint8Array(accumulatedAudioData.length + audioDataChunk.length);
+            newAccumulatedAudioData.set(accumulatedAudioData);
+            newAccumulatedAudioData.set(audioDataChunk, accumulatedAudioData.length);
+            accumulatedAudioData = newAccumulatedAudioData;
+
+            if (accumulatedAudioData.length >= MIN_AUDIO_SIZE_THRESHOLD) {
+                audioQueue.push(accumulatedAudioData);
+                accumulatedAudioData = new Uint8Array();  // Reset for next audio stream
+                playNextInQueue();
+            }
+            break; 
         case 'newAudioStream':
             console.log('New audio stream started');
             break;
@@ -195,14 +183,29 @@ function handleMessage(message) {
     }
 }
 
+function playNextInQueue() {
+    if (!isPlayingAudio && audioQueue.length > 0) {
+        const audioData = audioQueue.shift();  // Take the first item from queue
+        playAudioData(audioData);
+    }
+}
+
 function playAudioData(audioData) {
+    isPlayingAudio = true;
     // Convert the accumulated Uint8Array to an ArrayBuffer for the decodeAudioData method
     audioContext.decodeAudioData(audioData.buffer).then((decodedData) => {
         const source = audioContext.createBufferSource();
         source.buffer = decodedData;
         source.connect(audioContext.destination);
         source.start();
+
+        source.onended = function() {
+            isPlayingAudio = false;
+            playNextInQueue();  // Call to play the next audio in the queue if exists
+        };
     }).catch((error) => {
         console.error('Error with decoding audio data', error);
+        isPlayingAudio = false;
+        playNextInQueue();  // Attempt to play next even if current one fails
     });
 }
