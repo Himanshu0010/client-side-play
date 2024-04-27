@@ -40,11 +40,19 @@ function connectToAgent() {
 }
 
 function startRecording() {
-    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    const constraints = {
+        audio: {
+            channelCount: 1, // Ensure mono audio
+            sampleRate: 16000 // Attempt to set sample rate to 16000Hz
+        },
+        video: false
+    };
+
+    navigator.mediaDevices.getUserMedia(constraints)
         .then(stream => {
-            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=pcm' });
+            mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm; codecs=opus' }); // WebM format with Opus codec
             mediaRecorder.ondataavailable = handleAudioData;
-            mediaRecorder.start(1000);  // Collect 1000ms of data in each audio chunk
+            mediaRecorder.start(1000); // Collect data in chunks of 1000ms
         })
         .catch(error => console.error('Error accessing microphone:', error));
 }
@@ -52,20 +60,22 @@ function startRecording() {
 function handleAudioData(event) {
     if (event.data.size > 0) {
         event.data.arrayBuffer().then(buffer => {
-            // Make sure the buffer byte length is even
-            const byteLength = buffer.byteLength - (buffer.byteLength % 2);
-            const pcmDataBuffer = new ArrayBuffer(byteLength);
-            const view = new Uint8Array(buffer);
-            const pcmDataView = new Uint8Array(pcmDataBuffer);
-            pcmDataView.set(view.subarray(0, byteLength));
-            const pcmData = new Int16Array(pcmDataBuffer);
-            
-            const muLawData = encodeToMuLaw(pcmData);
-            const base64Data = btoa(String.fromCharCode.apply(null, muLawData));
-            socket.send(base64Data);
+            audioContext.decodeAudioData(buffer, function(decodedData) {
+                // Assuming the decoded data is at the right sample rate and is mono
+                // If not, you might need to resample here using an AudioContext
+                let samples = decodedData.getChannelData(0); // Get PCM data from the first channel
+                
+                // Convert Float32Array data to Int16Array
+                let pcmData = new Int16Array(samples.map(n => n * 32767));
+                
+                const muLawData = encodeToMuLaw(pcmData);
+                const base64Data = btoa(String.fromCharCode.apply(null, new Uint8Array(muLawData.buffer)));
+                socket.send(JSON.stringify({ "type": "audioIn", "data": base64Data }));
+            });
         });
     }
 }
+
 function encodeToMuLaw(pcmData) {
     const mu = 255;
     const muLawData = new Uint8Array(pcmData.length / 2);
@@ -79,15 +89,6 @@ function encodeToMuLaw(pcmData) {
     }
     return muLawData;
 }
-
-// function sendAudioData(base64Data) {
-//     const audioMessage = {
-//         type: 'audioIn',
-//         data: base64Data
-//     };
-//     socket.send(JSON.stringify(audioMessage));
-//     console.log('Sent audio data');
-// }
 
 let audioStreamTimeout = null;
 let accumulatedAudioChunks = [];
